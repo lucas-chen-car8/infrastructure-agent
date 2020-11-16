@@ -8,6 +8,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/newrelic/infrastructure-agent/internal/instrumentation"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -125,6 +126,7 @@ func main() {
 		alog.WithError(err).Error("can't load configuration file")
 		os.Exit(1)
 	}
+
 	if parsedConfig.Verbose == config.SmartVerboseLogging {
 		wlog.EnableSmartVerboseMode(parsedConfig.SmartVerboseModeEntryLimit)
 	}
@@ -199,6 +201,21 @@ var aslog = wlog.WithComponent("AgentService").WithFields(logrus.Fields{
 })
 
 func initializeAgentAndRun(c *config.Config, logFwCfg config.LogForward) error {
+	if c.EnableMetricsEndpoint {
+		server, err := instrumentation.NewOpentelemetryServer()
+		if err != nil {
+			return err
+		}
+		srv := &http.Server{
+			Handler:      server.GetHandler(),
+			Addr:         fmt.Sprintf("%s:%v", c.MetricsEndpointHost, c.MetricsEndpointPort),
+			WriteTimeout: 15 * time.Second,
+			ReadTimeout:  15 * time.Second,
+		}
+		go srv.ListenAndServe()
+		defer srv.Close()
+	}
+
 	pluginSourceDirs := []string{
 		c.CustomPluginInstallationDir,
 		filepath.Join(c.AgentDir, "custom-integrations"),
